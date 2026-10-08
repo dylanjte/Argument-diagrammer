@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Argument diagrammer</title>
+<style>
+  :root {
+    --ink: #000;
+    --paper: #fff;
+    --quiet: #6e6e6e;
+    --hair: #cfcfcf;
+    --signal: #ffbe00;
+    --panel: #fafafa;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+  }
+
+  /* ---------- sidebar ---------- */
+  aside {
+    width: 272px;
+    flex: 0 0 272px;
+    height: 100%;
+    overflow-y: auto;
+    border-right: 1px solid var(--hair);
+    padding: 18px 18px 24px;
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  h1 { font-size: 15px; font-weight: 700; margin: 0 0 2px; letter-spacing: 0.01em; }
+  h1 + p { margin: 0; color: var(--quiet); line-height: 1.35; }
+  section { display: flex; flex-direction: column; gap: 8px; }
+  h2 { font-size: 13px; font-weight: 700; margin: 0; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .hint { color: var(--quiet); line-height: 1.4; margin: 0; }
+
+  input[type="text"] {
+    font: inherit;
+    padding: 7px 9px;
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    background: var(--paper);
+    color: var(--ink);
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+  input[type="text"]:focus-visible, button:focus-visible, label:focus-within {
+    outline: 3px solid var(--ink); outline-offset: 2px;
+  }
+  button {
+    font: inherit;
+    padding: 7px 11px;
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    cursor: pointer;
+    line-height: 1.2;
+  }
+  button:hover:not(:disabled) { border-color: var(--ink); }
+  button:disabled { color: #b5b5b5; cursor: default; }
+  button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+  button.primary { border-color: var(--ink); }
+  .grow { flex: 1 1 auto; }
+
+  .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatch {
+    width: 26px; height: 26px; padding: 0;
+    border-radius: 50%;
+    border: 2px solid var(--paper);
+    box-shadow: 0 0 0 1px var(--hair);
+  }
+  .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+  .swatch:hover { box-shadow: 0 0 0 2px var(--ink); }
+
+  label.check { display: flex; align-items: center; gap: 7px; color: var(--ink); cursor: pointer; }
+  label.check input { margin: 0; }
+
+  #status { min-height: 1.3em; color: var(--quiet); }
+  kbd {
+    font: inherit; font-size: 12px;
+    border: 1px solid var(--hair); border-bottom-width: 2px; border-radius: 3px;
+    padding: 0 5px; background: var(--paper);
+  }
+  details summary { cursor: pointer; font-weight: 700; font-size: 13px; }
+  details p { margin: 8px 0 0; color: var(--quiet); line-height: 1.45; }
+  details p + p { margin-top: 6px; }
+
+  /* ---------- canvas ---------- */
+  main { flex: 1 1 auto; height: 100%; overflow: auto; position: relative; }
+  svg#board {
+    display: block;
+    width: 1800px; height: 1200px;
+    background: var(--paper);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  svg#board.dragging { cursor: grabbing; }
+  .node { cursor: grab; }
+  .port { cursor: crosshair; }
+  .arrow-hit, .bracket-hit { cursor: pointer; }
+  .halo { fill: none; stroke: var(--signal); stroke-width: 6; opacity: 0.9; pointer-events: none; }
+
+  @media (max-width: 760px) {
+    body { flex-direction: column; }
+    aside { width: 100%; flex: 0 0 auto; max-height: 46vh; border-right: 0; border-bottom: 1px solid var(--hair); }
+    main { height: auto; flex: 1 1 auto; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<aside>
+  <div>
+    <h1>Argument diagrammer</h1>
+    <p>Numbered circles, arrows, brackets. Export as PNG for slides and handouts.</p>
+  </div>
+
+  <section>
+    <h2>Circles</h2>
+    <div class="row">
+      <input id="numbers" type="text" class="grow" value="1-3" placeholder="1-5  or  1, 2, 3  or  n1, n2" aria-label="Numbers to add">
+      <button id="add" class="primary">Add</button>
+    </div>
+    <p class="hint">Ranges like 1-5 work. Double-click a circle to rename it.</p>
+  </section>
+
+  <section>
+    <h2>Connect</h2>
+    <div class="row">
+      <button id="bracket" title="Shortcut: B">Bracket</button>
+      <button id="unbracket" title="Shortcut: U">Unbracket</button>
+      <button id="flip" title="Shortcut: F">Flip arrow</button>
+      <button id="unarrow" title="Shortcut: X">Unarrow</button>
+    </div>
+    <div class="row">
+      <button id="autoalign" title="Shortcut: L">Auto-align</button>
+      <button id="align" title="Shortcut: A">Align row</button>
+    </div>
+    <p class="hint">Drag the dot under a circle onto another circle to draw an arrow toward it. Select two or more circles, then Bracket. The bracket gets its own dot.</p>
+    <p class="hint">Unbracket turns a bracket back into separate arrows. Unarrow removes the selected arrow, or every arrow between the selected circles. Auto-align lays out the selected circles (or everything, with nothing selected) in even rows, conclusion at the bottom.</p>
+  </section>
+
+  <section>
+    <h2>Style selected</h2>
+    <div class="swatches" id="swatches" role="group" aria-label="Color"></div>
+    <div class="row">
+      <button id="bold" aria-pressed="false">Bold</button>
+      <button id="dashed" aria-pressed="false">Dashed</button>
+      <button id="reset">Reset style</button>
+    </div>
+    <div class="row">
+      <button id="delete">Delete</button>
+      <button id="undo">Undo</button>
+      <button id="clear">Clear all</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Export</h2>
+    <div class="row">
+      <button id="png" class="primary">Download PNG</button>
+      <button id="copy">Copy PNG</button>
+    </div>
+    <div class="row">
+      <button id="svg">Download SVG</button>
+      <button id="save">Save file</button>
+      <button id="load">Open file</button>
+      <input id="file" type="file" accept=".json,application/json" hidden>
+    </div>
+    <label class="check"><input id="transparent" type="checkbox"> Transparent background</label>
+    <label class="check"><input id="snap" type="checkbox" checked> Snap to grid</label>
+    <div id="status" aria-live="polite"></div>
+  </section>
+
+  <details>
+    <summary>Keys</summary>
+    <p><kbd>Shift</kbd>+click adds to the selection. Drag on empty space to select a group.</p>
+    <p><kbd>B</kbd> bracket &nbsp; <kbd>U</kbd> unbracket &nbsp; <kbd>F</kbd> flip &nbsp; <kbd>X</kbd> unarrow</p>
+    <p><kbd>L</kbd> auto-align &nbsp; <kbd>A</kbd> align row &nbsp; <kbd>Delete</kbd> remove &nbsp; <kbd>Esc</kbd> deselect</p>
+    <p><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &nbsp; arrow keys nudge the selected circles</p>
+    <p>Selecting premises and a lower circle together, then pressing Bracket, draws the bracket and its arrow in one step.</p>
+    <p>By Dylan Teng</p>
+  </details>
+</aside>
+
+<main>
+  <svg id="board" xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-label="Diagram canvas">
+    <defs>
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <circle cx="20" cy="20" r="1" fill="#d8d8d8"></circle>
+      </pattern>
+    </defs>
+    <rect id="gridbg" x="0" y="0" width="1800" height="1200" fill="url(#grid)"></rect>
+    <g id="content"></g>
+    <g id="overlay"></g>
+  </svg>
+</main>
+
+<script>
+(() => {
+  // ---------------------------------------------------------------- constants
+  const R = 24;                 // circle radius
+  const GRID = 40;              // snap grid
+  const COLORS = [
+    { name: "Black",  hex: "#000000" },
+    { name: "Red",    hex: "#c8102e" },
+    { name: "Blue",   hex: "#1f5fbf" },
+    { name: "Green",  hex: "#2e7d32" },
+    { name: "Orange", hex: "#e07b00" },
+    { name: "Gray",   hex: "#8a8a8a" },
+  ];
+  const FONT_DIAGRAM = "Georgia, 'Times New Roman', Times, serif";
+
+  // ---------------------------------------------------------------- state
+  let state = { nodes: [], arrows: [], brackets: [] };
+  let nextId = 1;
+  let selection = [];           // [{ kind: "node"|"arrow"|"bracket", id }]
+  const history = [];
+
+  const $ = (s) => document.querySelector(s);
+  const board = $("#board");
+  const content = $("#content");
+  const overlay = $("#overlay");
+
+  const uid = () => nextId++;
+  const snapOn = () => $("#snap").checked;
+  const snap = (v) => snapOn() ? Math.round(v / (GRID / 2)) * (GRID / 2) : v;
+
+  const nodeById = (id) => state.nodes.find(n => n.id === id);
+  const bracketById = (id) => state.brackets.find(b => b.id === id);
+  const bracketOf = (nodeId) => state.brackets.find(b => b.members.includes(nodeId));
+  const isSelected = (kind, id) => selection.some(s => s.kind === kind && s.id === id);
+  const selectedOf = (kind) => selection.filter(s => s.kind === kind).map(s => s.id);
+
+  function commit() {
+    history.push(JSON.stringify(state));
+    if (history.length > 60) history.shift();
+  }
+  function undo() {
+    if (!history.length) { say("Nothing to undo."); return; }
+    state = JSON.parse(history.pop());
+    selection = selection.filter(s => exists(s.kind, s.id));
+    render();
+  }
+  function exists(kind, id) {
+    if (kind === "node") return !!nodeById(id);
+    if (kind === "arrow") return state.arrows.some(a => a.id === id);
+    return !!bracketById(id);
+  }
+
+  // ---------------------------------------------------------------- geometry
+  function bracketGeom(b) {
+    const pts = b.members.map(nodeById).filter(Boolean);
+    const y = Math.max(...pts.map(p => p.y));
+    const xs = pts.map(p => p.x);
+    const left = Math.min(...xs), right = Math.max(...xs);
+    const barY = y + R + 14;
+    return { pts, y, left, right, barY, mid: (left + right) / 2 };
+  }
+  function sourcePoint(src) {
+    if (src.kind === "node") { const n = nodeById(src.id); return n ? { x: n.x, y: n.y, trim: R + 4 } : null; }
+    const b = bracketById(src.id); if (!b) return null;
+    const g = bracketGeom(b); return { x: g.mid, y: g.barY, trim: 0 };
+  }
+  function arrowGeom(a) {
+    const s = sourcePoint(a.from), t = nodeById(a.to);
+    if (!s || !t) return null;
+    const dx = t.x - s.x, dy = t.y - s.y, d = Math.hypot(dx, dy) || 1;
+    const ux = dx / d, uy = dy / d;
+    const head = a.bold ? 14 : 11;
+    const x1 = s.x + ux * s.trim, y1 = s.y + uy * s.trim;
+    const tipX = t.x - ux * (R + 5), tipY = t.y - uy * (R + 5);
+    const baseX = tipX - ux * head, baseY = tipY - uy * head;
+    const w = head * 0.5;
+    const px = -uy, py = ux;
+    return {
+      x1, y1, x2: baseX, y2: baseY, tipX, tipY,
+      head: [[tipX, tipY], [baseX + px * w, baseY + py * w], [baseX - px * w, baseY - py * w]],
+    };
+  }
+
+  // ---------------------------------------------------------------- rendering
+  function svgEl(name, attrs = {}) {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", name);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+
+  function drawDiagram(target, forExport) {
+    const stroke = (item) => item.color || "#000000";
+    const width = (item, base) => item.bold ? base * 1.8 : base;
+    const dash = (item) => item.dashed ? "7 6" : "none";
+    const ports = [];
+
+    // brackets
+    for (const b of state.brackets) {
+      const g = bracketGeom(b);
+      if (g.pts.length < 2) continue;
+      const grp = svgEl("g", { "data-kind": "bracket", "data-id": b.id });
+      const sw = width(b, 2);
+      for (const p of g.pts) grp.appendChild(svgEl("line", { x1: p.x, y1: p.y + R + 3, x2: p.x, y2: g.barY, stroke: stroke(b), "stroke-width": sw, "stroke-dasharray": dash(b) }));
+      grp.appendChild(svgEl("line", { x1: g.left, y1: g.barY, x2: g.right, y2: g.barY, stroke: stroke(b), "stroke-width": sw, "stroke-dasharray": dash(b), "stroke-linecap": "square" }));
+      if (!forExport) {
+        if (isSelected("bracket", b.id)) grp.appendChild(svgEl("line", { class: "halo", x1: g.left - 6, y1: g.barY, x2: g.right + 6, y2: g.barY }));
+        grp.appendChild(svgEl("line", { class: "bracket-hit", x1: g.left, y1: g.barY, x2: g.right, y2: g.barY, stroke: "rgba(0,0,0,0)", "stroke-width": 16 }));
+        ports.push(svgEl("circle", { class: "port", "data-kind": "bracket", "data-id": b.id, cx: g.mid, cy: g.barY + 12, r: 6, fill: "#fff", stroke: "#6e6e6e", "stroke-width": 1.5 }));
+      }
+      target.appendChild(grp);
+    }
+
+    // arrows
+    for (const a of state.arrows) {
+      const g = arrowGeom(a);
+      if (!g) continue;
+      const grp = svgEl("g", { "data-kind": "arrow", "data-id": a.id });
+      const sw = width(a, 2);
+      if (!forExport && isSelected("arrow", a.id)) {
+        grp.appendChild(svgEl("line", { class: "halo", x1: g.x1, y1: g.y1, x2: g.tipX, y2: g.tipY, "stroke-width": 10 }));
+      }
+      grp.appendChild(svgEl("line", { x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2, stroke: stroke(a), "stroke-width": sw, "stroke-dasharray": dash(a) }));
+      grp.appendChild(svgEl("polygon", { points: g.head.map(p => p.join(",")).join(" "), fill: stroke(a), stroke: stroke(a), "stroke-width": a.bold ? 1.5 : 1, "stroke-linejoin": "round" }));
+      if (!forExport) grp.appendChild(svgEl("line", { class: "arrow-hit", x1: g.x1, y1: g.y1, x2: g.tipX, y2: g.tipY, stroke: "rgba(0,0,0,0)", "stroke-width": 16 }));
+      target.appendChild(grp);
+    }
+
+    // nodes
+    for (const n of state.nodes) {
+      const grp = svgEl("g", { class: "node", "data-kind": "node", "data-id": n.id });
+      if (!forExport && isSelected("node", n.id)) grp.appendChild(svgEl("circle", { class: "halo", cx: n.x, cy: n.y, r: R + 5 }));
+      grp.appendChild(svgEl("circle", { cx: n.x, cy: n.y, r: R, fill: "#ffffff", stroke: stroke(n), "stroke-width": width(n, 2), "stroke-dasharray": dash(n) }));
+      const label = svgEl("text", {
+        x: n.x, y: n.y + 1, "text-anchor": "middle", "dominant-baseline": "central",
+        "font-family": FONT_DIAGRAM, "font-size": n.bold ? 23 : 22, "font-weight": n.bold ? "700" : "400", fill: stroke(n),
+      });
+      label.textContent = n.label;
+      grp.appendChild(label);
+      target.appendChild(grp);
+      if (!forExport && !bracketOf(n.id)) {
+        ports.push(svgEl("circle", { class: "port", "data-kind": "node", "data-id": n.id, cx: n.x, cy: n.y + R + 12, r: 6, fill: "#fff", stroke: "#6e6e6e", "stroke-width": 1.5 }));
+      }
+    }
+    // dots go on top of everything, so an arrow visibly starts at its dot
+    for (const p of ports) target.appendChild(p);
+  }
+
+  function render() {
+    content.innerHTML = "";
+    drawDiagram(content, false);
+    syncButtons();
+  }
+
+  function syncButtons() {
+    const nodes = selectedOf("node").length, arrows = selectedOf("arrow").length;
+    $("#bracket").disabled = nodes < 2;
+    $("#unbracket").disabled = bracketsInSelection().length === 0;
+    $("#flip").disabled = arrows === 0;
+    $("#unarrow").disabled = arrowsInSelection().length === 0;
+    $("#align").disabled = nodes < 2;
+    $("#autoalign").disabled = state.nodes.length < 2;
+    $("#delete").disabled = selection.length === 0;
+    const items = selectedItems();
+    $("#bold").setAttribute("aria-pressed", String(items.length > 0 && items.every(i => i.bold)));
+    $("#dashed").setAttribute("aria-pressed", String(items.length > 0 && items.every(i => i.dashed)));
+    const colorNow = items.length && items.every(i => (i.color || "#000000") === (items[0].color || "#000000")) ? (items[0].color || "#000000") : null;
+    document.querySelectorAll(".swatch").forEach(s => s.setAttribute("aria-pressed", String(s.dataset.hex === colorNow)));
+    $("#png").disabled = $("#copy").disabled = $("#svg").disabled = state.nodes.length === 0;
+  }
+
+  function selectedItems() {
+    return selection.map(s => s.kind === "node" ? nodeById(s.id) : s.kind === "arrow" ? state.arrows.find(a => a.id === s.id) : bracketById(s.id)).filter(Boolean);
+  }
+
+  function say(msg) { $("#status").textContent = msg; }
+
+  // ---------------------------------------------------------------- numbers input
+  function parseNumbers(text) {
+    const out = [];
+    for (let tok of text.split(/[,\s]+/)) {
+      tok = tok.trim().replace(/^[nN]/, "");
+      if (!tok) continue;
+      const m = tok.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+      if (m) {
+        let a = +m[1], b = +m[2]; if (a > b) [a, b] = [b, a];
+        if (b - a > 40) b = a + 40;
+        for (let i = a; i <= b; i++) out.push(String(i));
+      } else out.push(tok);
+    }
+    return out;
+  }
+
+  function addNodes(labels) {
+    if (!labels.length) { say("Type something like 1-5 or 1, 2, 3."); return; }
+    commit();
+    const existing = new Set(state.nodes.map(n => n.label));
+    const added = [];
+    let x = 100, y = 100;
+    const occupied = (px, py) => state.nodes.some(n => Math.hypot(n.x - px, n.y - py) < R * 2.2);
+    for (const label of labels) {
+      if (existing.has(label)) continue;
+      while (occupied(x, y)) { x += GRID * 2; if (x > 1500) { x = 100; y += GRID * 3; } }
+      state.nodes.push({ id: uid(), label, x, y, color: "#000000", bold: false, dashed: false });
+      existing.add(label); added.push(label);
+      x += GRID * 2;
+    }
+    selection = [];
+    render();
+    say(added.length ? `Added ${added.join(", ")}. Drag them into place.` : "Those circles already exist.");
+  }
+
+  // ---------------------------------------------------------------- editing actions
+  function makeBracket() {
+    const ids = selectedOf("node");
+    if (ids.length < 2) { say("Select at least two circles first."); return; }
+    const nodes = ids.map(nodeById);
+    // A lone lowest circle becomes the conclusion the bracket points at.
+    const maxY = Math.max(...nodes.map(n => n.y));
+    const lowest = nodes.filter(n => n.y === maxY);
+    const upper = nodes.filter(n => maxY - n.y > R);
+    let members = nodes, target = null;
+    if (lowest.length === 1 && upper.length >= 2 && upper.length === nodes.length - 1) { members = upper; target = lowest[0]; }
+    if (members.some(n => bracketOf(n.id))) { say("One of those circles is already in a bracket."); return; }
+    commit();
+    const rowY = snap(members.reduce((s, n) => s + n.y, 0) / members.length);
+    members.forEach(n => { n.y = rowY; });
+    members.sort((a, b) => a.x - b.x);
+    const b = { id: uid(), members: members.map(n => n.id), color: "#000000", bold: false, dashed: false };
+    state.brackets.push(b);
+    // arrows that left the members individually now belong to the bracket
+    state.arrows = state.arrows.filter(a => !(a.from.kind === "node" && b.members.includes(a.from.id)));
+    if (target) state.arrows.push({ id: uid(), from: { kind: "bracket", id: b.id }, to: target.id, color: "#000000", bold: false, dashed: false });
+    selection = [{ kind: "bracket", id: b.id }];
+    render();
+    say(target ? "Bracket drawn, with its arrow." : "Bracket drawn. Drag its dot onto the conclusion.");
+  }
+
+  function addArrow(from, toId) {
+    if (from.kind === "node" && from.id === toId) return;
+    const dup = state.arrows.find(a => a.from.kind === from.kind && a.from.id === from.id && a.to === toId);
+    if (dup) { say("That arrow is already there."); return; }
+    if (from.kind === "bracket" && bracketById(from.id).members.includes(toId)) { say("A bracket can't point at one of its own circles."); return; }
+    commit();
+    const a = { id: uid(), from, to: toId, color: "#000000", bold: false, dashed: false };
+    state.arrows.push(a);
+    selection = [{ kind: "arrow", id: a.id }];
+    render();
+  }
+
+  function flipArrows() {
+    const ids = selectedOf("arrow");
+    const flippable = ids.map(id => state.arrows.find(a => a.id === id)).filter(a => a && a.from.kind === "node");
+    if (!flippable.length) { say("Select an arrow between two circles to flip it."); return; }
+    commit();
+    for (const a of flippable) { const t = a.to; a.to = a.from.id; a.from = { kind: "node", id: t }; }
+    render();
+  }
+
+  function alignRow() {
+    const nodes = selectedOf("node").map(nodeById);
+    if (nodes.length < 2) return;
+    commit();
+    nodes.sort((a, b) => a.x - b.x);
+    const y = snap(nodes.reduce((s, n) => s + n.y, 0) / nodes.length);
+    let x = snap(nodes[0].x);
+    for (const n of nodes) { n.x = x; n.y = y; x += GRID * 2; }
+    render();
+  }
+
+  function bracketsInSelection() {
+    const ids = new Set(selectedOf("bracket"));
+    for (const id of selectedOf("node")) { const b = bracketOf(id); if (b) ids.add(b.id); }
+    return [...ids];
+  }
+
+  function unbracket() {
+    const ids = bracketsInSelection();
+    if (!ids.length) { say("Select a bracket, or a circle inside one."); return; }
+    commit();
+    let made = 0;
+    for (const id of ids) {
+      const b = bracketById(id);
+      // each member gets its own arrow to whatever the bracket pointed at
+      for (const a of state.arrows.filter(a => a.from.kind === "bracket" && a.from.id === id)) {
+        for (const m of b.members) {
+          state.arrows.push({ id: uid(), from: { kind: "node", id: m }, to: a.to, color: a.color, bold: a.bold, dashed: a.dashed });
+          made++;
+        }
+      }
+      state.arrows = state.arrows.filter(a => !(a.from.kind === "bracket" && a.from.id === id));
+    }
+    state.brackets = state.brackets.filter(b => !ids.includes(b.id));
+    selection = selection.filter(s => !(s.kind === "bracket" && ids.includes(s.id)));
+    render();
+    say(made ? "Bracket removed. Each circle now has its own arrow." : "Bracket removed.");
+  }
+
+  function arrowsInSelection() {
+    const ids = new Set(selectedOf("arrow"));
+    const nodeSet = new Set(selectedOf("node")), bracketSet = new Set(selectedOf("bracket"));
+    const touches = (a, id) => a.to === id || (a.from.kind === "node" && a.from.id === id);
+    if (nodeSet.size + bracketSet.size >= 2) {
+      // every arrow that runs between selected things
+      for (const a of state.arrows) {
+        const srcSel = a.from.kind === "node" ? nodeSet.has(a.from.id) : bracketSet.has(a.from.id);
+        if (srcSel && nodeSet.has(a.to)) ids.add(a.id);
+      }
+    } else if (nodeSet.size === 1) {
+      const [id] = nodeSet;
+      for (const a of state.arrows) if (touches(a, id)) ids.add(a.id);
+    } else if (bracketSet.size === 1) {
+      const [id] = bracketSet;
+      for (const a of state.arrows) if (a.from.kind === "bracket" && a.from.id === id) ids.add(a.id);
+    }
+    return [...ids];
+  }
+
+  function unarrow() {
+    const ids = arrowsInSelection();
+    if (!ids.length) { say("Select an arrow, or the circles it connects."); return; }
+    commit();
+    state.arrows = state.arrows.filter(a => !ids.includes(a.id));
+    selection = selection.filter(s => !(s.kind === "arrow" && ids.includes(s.id)));
+    render();
+    say(ids.length === 1 ? "Arrow removed." : `${ids.length} arrows removed.`);
+  }
+
+  // Lay out the selected circles (or all of them) as a tree: conclusions on the
+  // bottom row, supporters centered above what they support, brackets centered
+  // over their conclusion.
+  function autoAlign() {
+    const picked = selectedOf("node");
+    const ids = new Set(picked.length ? picked : state.nodes.map(n => n.id));
+    if (ids.size < 2) { say("Select at least two circles, or clear the selection to align everything."); return; }
+    const inSet = (id) => ids.has(id);
+    const brs = state.brackets.filter(b => b.members.length >= 2 && b.members.every(inSet));
+    const bracketIn = (id) => brs.find(b => b.members.includes(id));
+    const arrows = state.arrows.filter(a => inSet(a.to) && (a.from.kind === "node"
+      ? inSet(a.from.id) && !bracketIn(a.from.id)
+      : brs.some(b => b.id === a.from.id)));
+
+    const outTargets = (id) => {
+      const t = arrows.filter(a => a.from.kind === "node" && a.from.id === id).map(a => a.to);
+      const b = bracketIn(id);
+      if (b) t.push(...arrows.filter(a => a.from.kind === "bracket" && a.from.id === b.id).map(a => a.to));
+      return t;
+    };
+    const levels = new Map(), visiting = new Set();
+    const level = (id) => {
+      if (levels.has(id)) return levels.get(id);
+      if (visiting.has(id)) return 0;
+      visiting.add(id);
+      const t = outTargets(id);
+      const l = t.length ? Math.max(...t.map(level)) + 1 : 0;
+      visiting.delete(id); levels.set(id, l);
+      return l;
+    };
+    ids.forEach(level);
+    for (const b of brs) { const l = Math.max(...b.members.map(level)); b.members.forEach(m => levels.set(m, l)); }
+
+    const supporters = new Map();
+    for (const a of arrows) {
+      const list = supporters.get(a.to) || [];
+      if (!list.some(u => u.kind === a.from.kind && u.id === a.from.id)) list.push({ kind: a.from.kind, id: a.from.id });
+      supporters.set(a.to, list);
+    }
+    const unitX = (u) => u.kind === "node" ? nodeById(u.id).x : Math.min(...bracketById(u.id).members.map(m => nodeById(m).x));
+
+    const SLOT = 100, ROW = 120;
+    const placed = new Set();
+    const pos = new Map();
+    const layoutUnit = (u, x0) => {
+      if (u.kind === "bracket") {
+        let x = x0, total = 0;
+        for (const m of [...bracketById(u.id).members].sort((a, b) => nodeById(a).x - nodeById(b).x)) {
+          const w = layoutUnit({ kind: "node", id: m }, x); x += w; total += w;
+        }
+        return total;
+      }
+      if (placed.has(u.id)) return 0;
+      placed.add(u.id);
+      const kids = (supporters.get(u.id) || []).slice().sort((a, b) => unitX(a) - unitX(b));
+      let x = x0, total = 0;
+      for (const k of kids) { const w = layoutUnit(k, x); x += w; total += w; }
+      if (total === 0) total = SLOT;
+      pos.set(u.id, { x: x0 + total / 2, y: -levels.get(u.id) * ROW });
+      return total;
+    };
+    const roots = [...ids].filter(id => outTargets(id).length === 0).sort((a, b) => nodeById(a).x - nodeById(b).x);
+    let x = 0;
+    for (const r of roots) { const w = layoutUnit({ kind: "node", id: r }, x); if (w) x += w + SLOT * 0.6; }
+    for (const id of ids) if (!placed.has(id)) { layoutUnit({ kind: "node", id }, x); x += SLOT; } // anything cyclic
+
+    // keep the diagram where it was: match the old top-left corner
+    const old = [...ids].map(nodeById);
+    const oldMinX = Math.min(...old.map(n => n.x)), oldMinY = Math.min(...old.map(n => n.y));
+    const newMinX = Math.min(...[...pos.values()].map(p => p.x)), newMinY = Math.min(...[...pos.values()].map(p => p.y));
+    commit();
+    for (const [id, p] of pos) { const n = nodeById(id); n.x = Math.round(p.x - newMinX + oldMinX); n.y = Math.round(p.y - newMinY + oldMinY); }
+    render();
+    say(picked.length ? "Selected circles aligned." : "Diagram aligned.");
+  }
+
+  function deleteSelected() {
+    if (!selection.length) return;
+    commit();
+    const nodeIds = new Set(selectedOf("node"));
+    const arrowIds = new Set(selectedOf("arrow"));
+    const bracketIds = new Set(selectedOf("bracket"));
+    state.nodes = state.nodes.filter(n => !nodeIds.has(n.id));
+    for (const b of state.brackets) b.members = b.members.filter(id => !nodeIds.has(id));
+    state.brackets.forEach(b => { if (b.members.length < 2) bracketIds.add(b.id); });
+    state.brackets = state.brackets.filter(b => !bracketIds.has(b.id));
+    state.arrows = state.arrows.filter(a => !arrowIds.has(a.id) && !nodeIds.has(a.to)
+      && !(a.from.kind === "node" && nodeIds.has(a.from.id)) && !(a.from.kind === "bracket" && bracketIds.has(a.from.id)));
+    selection = [];
+    render();
+  }
+
+  function styleSelected(fn) {
+    const items = selectedItems();
+    if (!items.length) { say("Select a circle, arrow, or bracket first."); return; }
+    commit();
+    items.forEach(fn);
+    render();
+  }
+
+  // ---------------------------------------------------------------- pointer interaction
+  let drag = null;   // { type: "move"|"arrow"|"band", ... }
+
+  function pointerPos(e) {
+    const pt = board.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const p = pt.matrixTransform(board.getScreenCTM().inverse());
+    return { x: p.x, y: p.y };
+  }
+  function hitNode(p) {
+    return state.nodes.find(n => Math.hypot(n.x - p.x, n.y - p.y) <= R + 8);
+  }
+
+  board.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const p = pointerPos(e);
+    const el = e.target.closest("[data-kind]");
+    const kind = el?.dataset.kind, id = el ? +el.dataset.id : null;
+    board.setPointerCapture(e.pointerId);
+
+    if (el?.classList.contains("port")) {
+      drag = { type: "arrow", from: { kind, id }, start: sourcePoint({ kind, id }), p };
+      return;
+    }
+    if (kind === "node") {
+      if (!isSelected("node", id)) selection = e.shiftKey ? [...selection, { kind, id }] : [{ kind, id }];
+      else if (e.shiftKey) selection = selection.filter(s => !(s.kind === kind && s.id === id));
+      render();
+      const moving = selectedOf("node").map(nodeById);
+      drag = { type: "move", moving, origin: moving.map(n => ({ id: n.id, x: n.x, y: n.y })), p, moved: false };
+      board.classList.add("dragging");
+      return;
+    }
+    if (kind === "arrow" || kind === "bracket") {
+      if (!isSelected(kind, id)) selection = e.shiftKey ? [...selection, { kind, id }] : [{ kind, id }];
+      else if (e.shiftKey) selection = selection.filter(s => !(s.kind === kind && s.id === id));
+      render();
+      return;
+    }
+    // empty space: rubber band
+    if (!e.shiftKey) { selection = []; render(); }
+    drag = { type: "band", p, add: e.shiftKey };
+  });
+
+  board.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const p = pointerPos(e);
+    overlay.innerHTML = "";
+    if (drag.type === "move") {
+      const dx = p.x - drag.p.x, dy = p.y - drag.p.y;
+      if (Math.hypot(dx, dy) > 2 && !drag.moved) { drag.moved = true; commit(); }
+      if (!drag.moved) return;
+      for (const o of drag.origin) { const n = nodeById(o.id); n.x = snap(o.x + dx); n.y = snap(o.y + dy); }
+      render();
+    } else if (drag.type === "arrow") {
+      const target = hitNode(p);
+      const end = target ? { x: target.x, y: target.y } : p;
+      overlay.appendChild(svgEl("line", { x1: drag.start.x, y1: drag.start.y, x2: end.x, y2: end.y, stroke: "#6e6e6e", "stroke-width": 2, "stroke-dasharray": "6 5" }));
+      if (target) overlay.appendChild(svgEl("circle", { class: "halo", cx: target.x, cy: target.y, r: R + 5 }));
+    } else if (drag.type === "band") {
+      const x = Math.min(p.x, drag.p.x), y = Math.min(p.y, drag.p.y);
+      overlay.appendChild(svgEl("rect", { x, y, width: Math.abs(p.x - drag.p.x), height: Math.abs(p.y - drag.p.y), fill: "rgba(255,190,0,0.12)", stroke: "#ffbe00", "stroke-width": 1.5 }));
+    }
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    const p = pointerPos(e);
+    overlay.innerHTML = "";
+    board.classList.remove("dragging");
+    if (drag.type === "arrow") {
+      const target = hitNode(p);
+      if (target) addArrow(drag.from, target.id);
+    } else if (drag.type === "band") {
+      const x0 = Math.min(p.x, drag.p.x), x1 = Math.max(p.x, drag.p.x), y0 = Math.min(p.y, drag.p.y), y1 = Math.max(p.y, drag.p.y);
+      if (x1 - x0 > 4 && y1 - y0 > 4) {
+        const inside = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+        const picked = [];
+        for (const n of state.nodes) if (inside(n.x, n.y)) picked.push({ kind: "node", id: n.id });
+        const nodeSet = new Set(picked.map(s => s.id));
+        for (const b of state.brackets) if (b.members.every(m => nodeSet.has(m))) picked.push({ kind: "bracket", id: b.id });
+        const bracketSet = new Set(picked.filter(s => s.kind === "bracket").map(s => s.id));
+        for (const a of state.arrows) {
+          const srcIn = a.from.kind === "node" ? nodeSet.has(a.from.id) : bracketSet.has(a.from.id);
+          if (srcIn && nodeSet.has(a.to)) picked.push({ kind: "arrow", id: a.id });
+        }
+        selection = drag.add ? [...selection, ...picked.filter(s => !isSelected(s.kind, s.id))] : picked;
+        render();
+      }
+    } else if (drag.type === "move") {
+      render();
+    }
+    drag = null;
+  }
+  board.addEventListener("pointerup", endDrag);
+  board.addEventListener("pointercancel", endDrag);
+
+  board.addEventListener("dblclick", (e) => {
+    const el = e.target.closest("[data-kind='node']");
+    if (!el || el.classList.contains("port")) return;
+    const n = nodeById(+el.dataset.id);
+    const label = prompt("Label for this circle", n.label);
+    if (label === null || !label.trim()) return;
+    commit(); n.label = label.trim(); render();
+  });
+
+  // ---------------------------------------------------------------- keyboard
+  document.addEventListener("keydown", (e) => {
+    const typing = ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { if (!typing) { e.preventDefault(); undo(); } return; }
+    if (typing) return;
+    const k = e.key;
+    if (k === "Delete" || k === "Backspace") { e.preventDefault(); deleteSelected(); }
+    else if (k === "Escape") { selection = []; render(); }
+    else if (k.toLowerCase() === "b") makeBracket();
+    else if (k.toLowerCase() === "u") unbracket();
+    else if (k.toLowerCase() === "f") flipArrows();
+    else if (k.toLowerCase() === "x") unarrow();
+    else if (k.toLowerCase() === "l") autoAlign();
+    else if (k.toLowerCase() === "a") alignRow();
+    else if (k.startsWith("Arrow")) {
+      const nodes = selectedOf("node").map(nodeById);
+      if (!nodes.length) return;
+      e.preventDefault();
+      const step = e.shiftKey ? GRID : GRID / 2;
+      const dx = k === "ArrowLeft" ? -step : k === "ArrowRight" ? step : 0;
+      const dy = k === "ArrowUp" ? -step : k === "ArrowDown" ? step : 0;
+      commit(); nodes.forEach(n => { n.x += dx; n.y += dy; }); render();
+    }
+  });
+
+  // ---------------------------------------------------------------- export
+  function contentBounds() {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const grow = (x, y, pad) => { minX = Math.min(minX, x - pad); maxX = Math.max(maxX, x + pad); minY = Math.min(minY, y - pad); maxY = Math.max(maxY, y + pad); };
+    for (const n of state.nodes) grow(n.x, n.y, R + 4);
+    for (const b of state.brackets) { const g = bracketGeom(b); grow(g.left, g.barY, 4); grow(g.right, g.barY, 4); }
+    return { x: minX - 18, y: minY - 18, w: maxX - minX + 36, h: maxY - minY + 36 };
+  }
+
+  function exportSVG() {
+    const bb = contentBounds();
+    const svg = svgEl("svg", { xmlns: "http://www.w3.org/2000/svg", width: bb.w, height: bb.h, viewBox: `${bb.x} ${bb.y} ${bb.w} ${bb.h}` });
+    if (!$("#transparent").checked) svg.appendChild(svgEl("rect", { x: bb.x, y: bb.y, width: bb.w, height: bb.h, fill: "#ffffff" }));
+    drawDiagram(svg, true);
+    return { text: new XMLSerializer().serializeToString(svg), w: bb.w, h: bb.h };
+  }
+
+  function toPNG(scale = 3) {
+    const { text, w, h } = exportSVG();
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(new Blob([text], { type: "image/svg+xml;charset=utf-8" }));
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Could not make a PNG.")), "image/png");
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not render the diagram.")); };
+      img.src = url;
+    });
+  }
+
+  function download(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const fileStem = () => "diagram-" + state.nodes.map(n => n.label).join("");
+
+  $("#png").addEventListener("click", async () => {
+    try { download(await toPNG(3), fileStem() + ".png"); say("PNG downloaded."); }
+    catch (err) { say(err.message); }
+  });
+  $("#copy").addEventListener("click", async () => {
+    try {
+      if (!navigator.clipboard || !window.ClipboardItem) throw new Error("This browser can't copy images. Use Download PNG.");
+      const blob = await toPNG(3);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      say("PNG copied. Paste it into your slide.");
+    } catch (err) { say(err.message); }
+  });
+  $("#svg").addEventListener("click", () => {
+    download(new Blob([exportSVG().text], { type: "image/svg+xml" }), fileStem() + ".svg");
+    say("SVG downloaded.");
+  });
+  $("#save").addEventListener("click", () => {
+    download(new Blob([JSON.stringify({ nextId, ...state }, null, 1)], { type: "application/json" }), fileStem() + ".json");
+    say("Saved. Open it later to keep editing.");
+  });
+  $("#load").addEventListener("click", () => $("#file").click());
+  $("#file").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      if (!Array.isArray(data.nodes)) throw new Error("That file isn't a saved diagram.");
+      commit();
+      state = { nodes: data.nodes, arrows: data.arrows || [], brackets: data.brackets || [] };
+      nextId = data.nextId || (Math.max(0, ...state.nodes.map(n => n.id), ...state.arrows.map(a => a.id), ...state.brackets.map(b => b.id)) + 1);
+      selection = []; render(); say(`Opened ${f.name}.`);
+    } catch (err) { say(err.message); }
+    e.target.value = "";
+  });
+
+  // ---------------------------------------------------------------- buttons
+  $("#add").addEventListener("click", () => addNodes(parseNumbers($("#numbers").value)));
+  $("#numbers").addEventListener("keydown", (e) => { if (e.key === "Enter") addNodes(parseNumbers($("#numbers").value)); });
+  $("#bracket").addEventListener("click", makeBracket);
+  $("#unbracket").addEventListener("click", unbracket);
+  $("#flip").addEventListener("click", flipArrows);
+  $("#unarrow").addEventListener("click", unarrow);
+  $("#autoalign").addEventListener("click", autoAlign);
+  $("#align").addEventListener("click", alignRow);
+  $("#delete").addEventListener("click", deleteSelected);
+  $("#undo").addEventListener("click", undo);
+  $("#clear").addEventListener("click", () => {
+    if (!state.nodes.length) return;
+    if (!confirm("Clear the whole diagram?")) return;
+    commit(); state = { nodes: [], arrows: [], brackets: [] }; selection = []; render(); say("Cleared.");
+  });
+  $("#bold").addEventListener("click", () => { const on = $("#bold").getAttribute("aria-pressed") !== "true"; styleSelected(i => { i.bold = on; }); });
+  $("#dashed").addEventListener("click", () => { const on = $("#dashed").getAttribute("aria-pressed") !== "true"; styleSelected(i => { i.dashed = on; }); });
+  $("#reset").addEventListener("click", () => styleSelected(i => { i.color = "#000000"; i.bold = false; i.dashed = false; }));
+
+  const swatches = $("#swatches");
+  for (const c of COLORS) {
+    const b = document.createElement("button");
+    b.className = "swatch"; b.title = c.name; b.setAttribute("aria-label", c.name);
+    b.dataset.hex = c.hex; b.style.background = c.hex; b.setAttribute("aria-pressed", "false");
+    b.addEventListener("click", () => styleSelected(i => { i.color = c.hex; }));
+    swatches.appendChild(b);
+  }
+
+  // ---------------------------------------------------------------- start with an example
+  state.nodes = [
+    { id: uid(), label: "1", x: 220, y: 140, color: "#000000", bold: false, dashed: false },
+    { id: uid(), label: "2", x: 300, y: 140, color: "#000000", bold: false, dashed: false },
+    { id: uid(), label: "3", x: 260, y: 260, color: "#000000", bold: false, dashed: false },
+  ];
+  state.brackets = [{ id: uid(), members: [1, 2], color: "#000000", bold: false, dashed: false }];
+  state.arrows = [{ id: uid(), from: { kind: "bracket", id: 4 }, to: 3, color: "#000000", bold: false, dashed: false }];
+  render();
+  say("Drag circles to move them. Drag a dot onto a circle to draw an arrow.");
+})();
+</script>
+</body>
+</html>
